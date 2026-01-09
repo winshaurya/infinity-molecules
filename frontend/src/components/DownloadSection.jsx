@@ -1,8 +1,8 @@
 import { useState } from 'react'
 
-function DownloadSection({ user, jobs, profile, onDownload, onRefillCredits }) {
+function DownloadSection({ user, jobs, profile, onDownload, onRefillCredits, currentJob }) {
   const [downloadForm, setDownloadForm] = useState({
-    jobId: '',
+    jobId: currentJob?.id || '',
     moleculesCount: 1000,
     format: 'csv'
   })
@@ -43,17 +43,14 @@ function DownloadSection({ user, jobs, profile, onDownload, onRefillCredits }) {
     <div className="download-section">
       <h3>Download Molecules</h3>
       <div className="download-form">
-        <select
-          value={downloadForm.jobId}
-          onChange={(e) => setDownloadForm(prev => ({ ...prev, jobId: e.target.value }))}
-        >
-          <option value="">Select a completed job</option>
-          {jobs.filter(job => job.status === 'completed').map(job => (
-            <option key={job.id} value={job.id}>
-              Job {job.id.slice(0, 8)} - {job.total_molecules} molecules ({new Date(job.created_at).toLocaleDateString()})
-            </option>
-          ))}
-        </select>
+        {currentJob && currentJob.status === 'completed' ? (
+          <div className="current-job-info">
+            <p><strong>Current Job:</strong> {currentJob.id.slice(0, 8)} - {currentJob.total_molecules} molecules</p>
+            <input type="hidden" value={currentJob.id} />
+          </div>
+        ) : (
+          <p className="no-current-job">No completed job available for download</p>
+        )}
         <input
           type="number"
           placeholder="Molecules to download"

@@ -4,7 +4,7 @@ import './App.css'
 import AuthModal from './components/AuthModal.jsx'
 import ProfileModal from './components/ProfileModal.jsx'
 import MoleculeForm from './components/MoleculeForm.jsx'
-import JobStatus from './components/JobStatus.jsx'
+
 import DownloadSection from './components/DownloadSection.jsx'
 import { useMoleculeGeneration } from './hooks/useMoleculeGeneration.js'
 import { useUserProfile } from './hooks/useUserProfile.js'
@@ -178,12 +178,13 @@ function App() {
           <button onClick={() => setShowProfile(true)}>Profile</button>
         </div>
 
-        <JobStatus currentJob={currentJob} jobs={jobs} />
+
 
         <DownloadSection
           user={user}
           jobs={jobs}
           profile={profile}
+          currentJob={currentJob}
           onDownload={handleDownload}
         />
 
