@@ -74,17 +74,6 @@ class CreditRefillRequest(BaseModel):
 # Database helper functions
 def get_user_by_id(user_id: str):
     """Get user data by ID"""
-    if not supabase:
-        # Mock user for offline mode
-        return {
-            'id': user_id,
-            'email': 'user@example.com',
-            'credits': 100,
-            'is_fullaccess': True,
-            'created_at': datetime.now().isoformat(),
-            'updated_at': datetime.now().isoformat()
-        }
-
     try:
         response = supabase.table('users').select('*').eq('id', user_id).execute()
         if response.data:
@@ -100,14 +89,10 @@ def get_user_by_id(user_id: str):
         return None
     except Exception as e:
         print(f"Error getting user {user_id}: {e}")
-        return None
+        raise
 
 def update_user_credits(user_id: str, new_credits: int):
     """Update user credits"""
-    if not supabase:
-        print(f"Mock: Updated credits for user {user_id} to {new_credits}")
-        return
-
     try:
         supabase.table('users').update({
             'credits': new_credits,
@@ -119,10 +104,6 @@ def update_user_credits(user_id: str, new_credits: int):
 
 def create_job(job_data: dict):
     """Create a new job"""
-    if not supabase:
-        print(f"Mock: Created job {job_data['id']}")
-        return
-
     try:
         supabase.table('jobs').insert(job_data).execute()
     except Exception as e:
@@ -131,10 +112,6 @@ def create_job(job_data: dict):
 
 def update_job_status(job_id: str, status: str, total_molecules: int = None, completed_at: str = None):
     """Update job status"""
-    if not supabase:
-        print(f"Mock: Updated job {job_id} status to {status}")
-        return
-
     try:
         update_data = {'status': status, 'updated_at': 'now()'}
         if total_molecules is not None:
@@ -148,19 +125,6 @@ def update_job_status(job_id: str, status: str, total_molecules: int = None, com
 
 def get_job_by_id(job_id: str, user_id: str):
     """Get job by ID for specific user"""
-    if not supabase:
-        # Mock job for offline mode
-        return {
-            'id': job_id,
-            'user_id': user_id,
-            'parameters': '{"carbon_count": 5, "functional_groups": ["OH"], "double_bonds": 0, "triple_bonds": 0, "rings": 0, "carbon_types": ["primary", "secondary", "tertiary"]}',
-            'status': 'completed',
-            'total_molecules': 10,
-            'created_at': datetime.now().isoformat(),
-            'updated_at': datetime.now().isoformat(),
-            'completed_at': datetime.now().isoformat()
-        }
-
     try:
         response = supabase.table('jobs').select('*').eq('id', job_id).eq('user_id', user_id).execute()
         if response.data:
@@ -178,31 +142,10 @@ def get_job_by_id(job_id: str, user_id: str):
         return None
     except Exception as e:
         print(f"Error getting job {job_id}: {e}")
-        return None
+        raise
 
 def fetch_user_jobs(user_id: str, limit: int = 20, offset: int = 0):
     """Get user's jobs with pagination"""
-    if not supabase:
-        # Mock jobs for offline mode
-        mock_jobs = [{
-            'id': 'mock-job-1',
-            'user_id': user_id,
-            'parameters': '{"carbon_count": 5, "functional_groups": ["OH"], "double_bonds": 0, "triple_bonds": 0, "rings": 0, "carbon_types": ["primary", "secondary", "tertiary"]}',
-            'status': 'completed',
-            'total_molecules': 10,
-            'created_at': datetime.now().isoformat(),
-            'updated_at': datetime.now().isoformat(),
-            'completed_at': datetime.now().isoformat()
-        }]
-        return {
-            'jobs': mock_jobs,
-            'total_count': 1,
-            'count': 1,
-            'limit': limit,
-            'offset': offset,
-            'has_more': False
-        }
-
     try:
         # Get total count
         count_response = supabase.table('jobs').select('id', count='exact').eq('user_id', user_id).execute()
@@ -232,19 +175,10 @@ def fetch_user_jobs(user_id: str, limit: int = 20, offset: int = 0):
         }
     except Exception as e:
         print(f"Error fetching user jobs: {e}")
-        return {'jobs': [], 'total_count': 0, 'count': 0, 'limit': limit, 'offset': offset, 'has_more': False}
+        raise
 
 def get_user_activity(user_id: str, limit: int = 10):
     """Get user's recent activity"""
-    if not supabase:
-        # Mock activity for offline mode
-        return [{
-            'activity_type': 'job_completed',
-            'details': 'Generated 10 molecules',
-            'credits_amount': None,
-            'activity_date': datetime.now().isoformat()
-        }]
-
     try:
         response = supabase.table('user_activity_history').select('*').eq('user_id', user_id).order('activity_date', desc=True).limit(limit).execute()
         activities = response.data or []
@@ -256,14 +190,10 @@ def get_user_activity(user_id: str, limit: int = 10):
         } for activity in activities]
     except Exception as e:
         print(f"Error getting user activity: {e}")
-        return []
+        raise
 
 def add_credit_history(user_id: str, amount: int, reason: str, description: str):
     """Add credit history entry"""
-    if not supabase:
-        print(f"Mock: Added credit history for user {user_id}: {amount} credits")
-        return
-
     try:
         supabase.table('credit_history').insert({
             'user_id': user_id,
@@ -273,6 +203,7 @@ def add_credit_history(user_id: str, amount: int, reason: str, description: str)
         }).execute()
     except Exception as e:
         print(f"Error adding credit history: {e}")
+        raise
 
 def add_user_activity(user_id: str, activity_type: str, details: str = None, credits_amount: int = None):
     """Add user activity entry (deprecated - using views now)"""
