@@ -9,6 +9,9 @@ import os
 import json
 import sys
 import os
+import io
+import zipfile
+import base64
 from supabase import create_client, Client
 from dotenv import load_dotenv
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -43,8 +46,8 @@ print(f"Loading SUPABASE_URL: {SUPABASE_URL}")
 print(f"Loading SUPABASE_SERVICE_ROLE_KEY: {SUPABASE_SERVICE_ROLE_KEY[:20] if SUPABASE_SERVICE_ROLE_KEY else 'Not set'}...")
 print(f"Loading SUPABASE_ANON_KEY: {SUPABASE_ANON_KEY[:20] if SUPABASE_ANON_KEY else 'Not set'}...")
 
-# Use anon key for server-side operations (service role key may have restrictions)
-supabase_key = SUPABASE_ANON_KEY
+# Use service role key for server-side operations (bypasses RLS)
+supabase_key = SUPABASE_SERVICE_ROLE_KEY
 
 if not SUPABASE_URL or not supabase_key:
     raise ValueError("SUPABASE_URL and either SUPABASE_SERVICE_ROLE_KEY or SUPABASE_ANON_KEY must be set")
@@ -68,7 +71,7 @@ class JobRequest(BaseModel):
 class DownloadRequest(BaseModel):
     job_id: str
     molecules_count: int = Field(gt=0)
-    download_format: str = Field(pattern="^(csv|sdf|all)$")
+    download_format: str = Field(pattern="^(csv|molsdf)$")
 
 class CreditRefillRequest(BaseModel):
     amount: int = Field(gt=0, description="Amount of credits to add")
@@ -195,6 +198,22 @@ def get_user_activity(user_id: str, limit: int = 10):
         print(f"Error getting user activity: {e}")
         raise
 
+def get_credit_history(user_id: str, limit: int = 10):
+    """Get user's credit history"""
+    try:
+        response = supabase.table('credit_history').select('*').eq('user_id', user_id).order('created_at', desc=True).limit(limit).execute()
+        history = response.data or []
+        return [{
+            'id': item['id'],
+            'amount': item['amount'],
+            'reason': item['reason'],
+            'description': item['description'],
+            'created_at': item['created_at']
+        } for item in history]
+    except Exception as e:
+        print(f"Error getting credit history: {e}")
+        raise
+
 def add_credit_history(user_id: str, amount: int, reason: str, description: str):
     """Add credit history entry"""
     try:
@@ -206,6 +225,20 @@ def add_credit_history(user_id: str, amount: int, reason: str, description: str)
         }).execute()
     except Exception as e:
         print(f"Error adding credit history: {e}")
+        raise
+
+def add_download_record(user_id: str, job_id: str, molecules_downloaded: int, credits_used: int, download_type: str):
+    """Add download record"""
+    try:
+        supabase.table('downloads').insert({
+            'user_id': user_id,
+            'job_id': job_id,
+            'molecules_downloaded': molecules_downloaded,
+            'credits_used': credits_used,
+            'download_type': download_type
+        }).execute()
+    except Exception as e:
+        print(f"Error adding download record: {e}")
         raise
 
 def add_user_activity(user_id: str, activity_type: str, details: str = None, credits_amount: int = None):
@@ -290,7 +323,7 @@ async def start_generation(request: JobRequest, background_tasks: BackgroundTask
     if request.rings > 0:
         total_valency += request.rings
 
-    functional_group_valency = sum(len(fg) for fg in request.functional_groups)  # Rough estimate
+    functional_group_valency = len(request.functional_groups)  # Count of functional groups
     if functional_group_valency > total_valency:
         raise HTTPException(
             status_code=400,
@@ -429,8 +462,12 @@ async def download_molecules(request: DownloadRequest, user_id: str = Depends(ge
         new_credits = user_credits - credits_required
         update_user_credits(user_id, new_credits)
 
+        # Add download record
+        download_format_for_record = 'sdf' if request.download_format == 'molsdf' else request.download_format
+        add_download_record(user_id, request.job_id, request.molecules_count, credits_required, download_format_for_record)
+
         # Add credit history and activity
-        add_credit_history(user_id, -credits_required, f"Download {request.molecules_count} molecules", f"Downloaded {request.molecules_count} molecules in {request.download_format} format")
+        add_credit_history(user_id, -credits_required, 'download', f"Downloaded {request.molecules_count} molecules in {request.download_format} format")
         add_user_activity(user_id, 'download',
                          f'Downloaded {request.molecules_count} molecules in {request.download_format} format',
                          -credits_required)
@@ -454,20 +491,39 @@ async def download_molecules(request: DownloadRequest, user_id: str = Depends(ge
             data = 'SMILES\n' + '\n'.join(selected_smiles)
             content_type = 'text/csv'
             filename = f'molecules_{request.job_id[:8]}.csv'
-        elif request.download_format == 'sdf':
-            # For SDF, need to create molecules
-            sdf_data = ''
-            for i, smiles in enumerate(selected_smiles):
-                try:
-                    mol = Chem.MolFromSmiles(smiles)
-                    if mol:
-                        mol_block = Chem.MolToMolBlock(mol)
-                        sdf_data += mol_block + '\n$$$$\n'
-                except:
-                    continue  # Skip invalid molecules
-            data = sdf_data
-            content_type = 'chemical/x-mdl-sdfile'
-            filename = f'molecules_{request.job_id[:8]}.sdf'
+        elif request.download_format == 'molsdf':
+            # Create ZIP file with MOL, SDF, and CSV files
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                # Create CSV file
+                csv_data = 'SMILES\n' + '\n'.join(selected_smiles)
+                zip_file.writestr(f'molecules_{request.job_id[:8]}.csv', csv_data)
+                
+                # Create SDF file
+                sdf_data = ''
+                for i, smiles in enumerate(selected_smiles):
+                    try:
+                        mol = Chem.MolFromSmiles(smiles)
+                        if mol:
+                            mol_block = Chem.MolToMolBlock(mol)
+                            sdf_data += mol_block + '\n$$$$\n'
+                    except:
+                        continue  # Skip invalid molecules
+                zip_file.writestr(f'molecules_{request.job_id[:8]}.sdf', sdf_data)
+                
+                # Create individual MOL files
+                for i, smiles in enumerate(selected_smiles):
+                    try:
+                        mol = Chem.MolFromSmiles(smiles)
+                        if mol:
+                            mol_block = Chem.MolToMolBlock(mol)
+                            zip_file.writestr(f'molecule_{i+1:04d}.mol', mol_block)
+                    except:
+                        continue  # Skip invalid molecules
+            
+            data = base64.b64encode(zip_buffer.getvalue()).decode('utf-8')
+            content_type = 'application/zip'
+            filename = f'molecules_{request.job_id[:8]}_package.zip'
         else:  # json or all
             data = json.dumps({'molecules': selected_smiles})
             content_type = 'application/json'
@@ -503,6 +559,9 @@ async def get_user_profile(user_id: str = Depends(get_current_user)):
         # Get recent activity (last 10 items)
         recent_activity = get_user_activity(user_id, 10)
 
+        # Get credit history (last 10 items)
+        credit_history = get_credit_history(user_id, 10)
+
         return {
             "user_id": user_data['id'],
             "email": user_data['email'],
@@ -510,7 +569,8 @@ async def get_user_profile(user_id: str = Depends(get_current_user)):
             "subscription_tier": tier,
             "is_fullaccess": user_data['is_fullaccess'],
             "created_at": user_data['created_at'],
-            "recent_activity": recent_activity
+            "recent_activity": recent_activity,
+            "credit_history": credit_history
         }
     except HTTPException:
         raise
@@ -579,7 +639,7 @@ async def refill_credits(request: CreditRefillRequest, user_id: str = Depends(ge
         update_user_credits(user_id, new_credits)
 
         # Add credit history and activity
-        add_credit_history(user_id, request.amount, request.description)
+        add_credit_history(user_id, request.amount, 'refill', request.description)
         add_user_activity(user_id, 'credit_refill',
                          f'Added {request.amount} credits: {request.description}', request.amount)
 

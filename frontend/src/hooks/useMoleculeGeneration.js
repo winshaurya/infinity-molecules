@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { API_BASE } from '../constants.js'
+import { validateStructurePossibility } from '../utils/moleculeUtils.js'
 
 export function useMoleculeGeneration(user, supabase, showToast) {
   const [formData, setFormData] = useState({
@@ -13,6 +14,29 @@ export function useMoleculeGeneration(user, supabase, showToast) {
   const [currentJob, setCurrentJob] = useState(null)
   const [jobs, setJobs] = useState([])
   const [generating, setGenerating] = useState(false)
+
+  const normalizeJob = (job = {}) => {
+    const parsedParams = (() => {
+      if (!job.parameters) return null
+      if (typeof job.parameters === 'string') {
+        try {
+          return JSON.parse(job.parameters)
+        } catch (_e) {
+          return null
+        }
+      }
+      return job.parameters
+    })()
+
+    return {
+      job_id: job.job_id || job.id || null,
+      status: job.status || 'pending',
+      total_molecules: job.total_molecules || 0,
+      created_at: job.created_at || null,
+      completed_at: job.completed_at || null,
+      parameters: parsedParams
+    }
+  }
 
   const handleInputChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }))
@@ -62,6 +86,24 @@ export function useMoleculeGeneration(user, supabase, showToast) {
       return
     }
 
+    const flattenedFunctionalGroups = Object.entries(formData.functional_groups)
+      .filter(([_, count]) => count > 0)
+      .flatMap(([fg, count]) => Array(count).fill(fg))
+
+    const validation = validateStructurePossibility({
+      carbonCount: formData.carbon_count,
+      functionalGroups: flattenedFunctionalGroups,
+      doubleBonds: formData.double_bonds,
+      tripleBonds: formData.triple_bonds,
+      rings: formData.rings,
+      carbonTypes: formData.carbon_types
+    })
+
+    if (!validation.valid) {
+      showToast(validation.message || 'Invalid molecular configuration', 'error')
+      return
+    }
+
     setGenerating(true)
     const payload = {
       carbon_count: formData.carbon_count,
@@ -69,9 +111,7 @@ export function useMoleculeGeneration(user, supabase, showToast) {
       triple_bonds: formData.triple_bonds,
       rings: formData.rings,
       carbon_types: formData.carbon_types,
-      functional_groups: Object.entries(formData.functional_groups)
-        .filter(([_, count]) => count > 0)
-        .flatMap(([fg, count]) => Array(count).fill(fg))
+      functional_groups: flattenedFunctionalGroups
     }
 
     try {
@@ -91,12 +131,12 @@ export function useMoleculeGeneration(user, supabase, showToast) {
       }
 
       const data = await response.json()
-      setCurrentJob({ id: data.job_id, status: 'pending' })
+      setCurrentJob(normalizeJob({ job_id: data.job_id, status: 'pending', total_molecules: 0 }))
       showToast('Generation started! Check status below.', 'success')
       pollJobStatus(data.job_id)
       loadUserJobs()
     } catch (error) {
-      showToast('Failed to start generation: ' + error.message)
+      showToast(error.message || 'Generation failed', 'error')
     } finally {
       setGenerating(false)
     }
@@ -116,13 +156,15 @@ export function useMoleculeGeneration(user, supabase, showToast) {
         }
 
         const data = await response.json()
-        setCurrentJob(data)
+        setCurrentJob(normalizeJob(data))
 
         if (data.status === 'completed' || data.status === 'failed') {
           clearInterval(interval)
           loadUserJobs()
           if (data.status === 'completed') {
             showToast(`Generation completed! ${data.total_molecules} molecules generated.`, 'success')
+          } else if (data.status === 'failed') {
+            showToast('Generation failed. Please review your inputs and try again.', 'error')
           }
         }
       } catch (error) {
@@ -143,7 +185,15 @@ export function useMoleculeGeneration(user, supabase, showToast) {
 
       if (response.ok) {
         const data = await response.json()
-        setJobs(data.jobs)
+        const normalizedJobs = (data.jobs || []).map(normalizeJob)
+        setJobs(normalizedJobs)
+
+        if (!currentJob || ['completed', 'failed'].includes(currentJob.status)) {
+          const latestCompleted = normalizedJobs.find(job => job.status === 'completed')
+          if (latestCompleted) {
+            setCurrentJob(latestCompleted)
+          }
+        }
       }
     } catch (error) {
       console.error('Failed to load jobs:', error)

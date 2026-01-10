@@ -189,6 +189,7 @@ def validate_structure_possibility(carbon_count, functional_groups, n_double_bon
             'COOH', 'CHO',
             'COOR_CH3', 'COOR_C2H5', 'COOR_C3H7', 'COOR_CH(CH3)2',
             'COX_Cl', 'COX_Br', 'COX_F', 'COX_I',
+            'OX_Cl', 'OX_Br', 'OX_F', 'OX_I',
             'NH2',
         }
         invalid_groups_for_zero_carbon = {

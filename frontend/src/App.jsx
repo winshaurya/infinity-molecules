@@ -44,6 +44,23 @@ function App() {
     setTimeout(() => setToast(null), 5000)
   })
 
+  const jobStatusMessage = (() => {
+    if (!currentJob) return ''
+    const shortId = currentJob.job_id ? currentJob.job_id.slice(0, 8) : ''
+    switch (currentJob.status) {
+      case 'pending':
+        return `Job ${shortId} is queued. Preparing generation...`
+      case 'processing':
+        return `Job ${shortId} is generating molecules. Large batches can take a minute to render.`
+      case 'completed':
+        return `Job ${shortId} completed with ${currentJob.total_molecules} molecules. Ready to download.`
+      case 'failed':
+        return `Job ${shortId} failed. Please adjust inputs and try again.`
+      default:
+        return ''
+    }
+  })()
+
   useEffect(() => {
     const checkUser = async () => {
       if (supabase) {
@@ -101,6 +118,14 @@ function App() {
         })
       })
 
+      if (response.status === 402) {
+        // Insufficient credits - redirect to profile
+        setShowProfile(true)
+        setToast({ message: 'Insufficient credits. Please add more credits to download.', type: 'error' })
+        setTimeout(() => setToast(null), 5000)
+        return
+      }
+
       if (!response.ok) {
         const error = await response.json()
         throw new Error(error.detail || 'Download failed')
@@ -109,7 +134,12 @@ function App() {
       const data = await response.json()
 
       // Create blob and download
-      const blob = new Blob([data.data], { type: data.content_type })
+      let blobData = data.data
+      if (data.content_type === 'application/zip') {
+        // Decode base64 for zip files
+        blobData = Uint8Array.from(atob(data.data), c => c.charCodeAt(0))
+      }
+      const blob = new Blob([blobData], { type: data.content_type })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -178,6 +208,12 @@ function App() {
           <button onClick={() => setShowProfile(true)}>Profile</button>
         </div>
 
+        {jobStatusMessage && (
+          <div className={`job-status job-status-${currentJob?.status || 'default'}`}>
+            {jobStatusMessage}
+          </div>
+        )}
+
 
 
         <DownloadSection
@@ -186,6 +222,7 @@ function App() {
           profile={profile}
           currentJob={currentJob}
           onDownload={handleDownload}
+          onShowProfile={() => setShowProfile(true)}
         />
 
         <div className="info-text">
