@@ -69,15 +69,10 @@ function DownloadSection({ user, jobs, profile, onDownload, onRefillCredits, cur
           placeholder="Molecules to download"
           value={downloadForm.moleculesCount}
           onChange={(e) => {
-            const rawValue = parseInt(e.target.value, 10)
-            const safeValue = isNaN(rawValue) ? 1000 : rawValue
-            const clampedValue = maxMolecules > 0
-              ? Math.max(1, Math.min(safeValue, maxMolecules))
-              : Math.max(1, safeValue)
-            setDownloadForm(prev => ({ ...prev, moleculesCount: clampedValue }))
+            const rawValue = parseInt(e.target.value, 10) || 0
+            setDownloadForm(prev => ({ ...prev, moleculesCount: Math.max(0, rawValue) }))
           }}
-          min="1"
-          max={maxMolecules || undefined}
+          min="0"
           step="1000"
         />
         <select

@@ -12,6 +12,7 @@
   "dependencies": {
     "@rdkit/rdkit": "^2025.3.4-1.0.0",
     "@supabase/supabase-js": "^2.38.4",
+    "jszip": "^3.10.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },

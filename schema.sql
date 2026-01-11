@@ -57,6 +57,24 @@ CREATE TABLE IF NOT EXISTS public.jobs (
 -- Downloads cost credits: Tracked separately in downloads table
 
 -- =====================================================
+-- JOB RESULTS TABLE
+-- Persists generated molecules per job (JSON payload)
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS public.job_results (
+    job_id UUID PRIMARY KEY REFERENCES public.jobs(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES public.users(id) ON DELETE CASCADE NOT NULL,
+    payload JSONB NOT NULL,
+    result_size INTEGER GENERATED ALWAYS AS (jsonb_array_length(payload->'molecules')) STORED,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
+-- JOB RESULTS TABLE: Stores generated SMILES payloads per job
+-- Connects to: jobs table (job_id) and users table (user_id)
+-- Purpose: Allows backend to fetch molecules without regenerating or relying on Storage
+-- result_size: Derived column for quick counts and pruning heuristics
+-- Lifecycle: Entries deleted when jobs are pruned to keep most recent generations only
+
+-- =====================================================
 -- DOWNLOADS TABLE
 -- Tracks molecule downloads and credit usage
 -- =====================================================
@@ -111,6 +129,10 @@ CREATE INDEX IF NOT EXISTS idx_jobs_user_id ON public.jobs(user_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON public.jobs(status);
 CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON public.jobs(created_at DESC);
 
+-- Job results indexes
+CREATE INDEX IF NOT EXISTS idx_job_results_user_id ON public.job_results(user_id);
+CREATE INDEX IF NOT EXISTS idx_job_results_created_at ON public.job_results(created_at DESC);
+
 -- Downloads table indexes
 CREATE INDEX IF NOT EXISTS idx_downloads_user_id ON public.downloads(user_id);
 CREATE INDEX IF NOT EXISTS idx_downloads_job_id ON public.downloads(job_id);
@@ -136,6 +158,7 @@ ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.jobs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.downloads ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.credit_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.job_results ENABLE ROW LEVEL SECURITY;
 
 -- Users policies
 CREATE POLICY "Users can view own profile" ON public.users
@@ -143,6 +166,10 @@ CREATE POLICY "Users can view own profile" ON public.users
 
 -- Jobs policies
 CREATE POLICY "Users can view own jobs" ON public.jobs
+    FOR ALL USING (auth.uid() = user_id);
+
+-- Job results policies
+CREATE POLICY "Users can manage own job results" ON public.job_results
     FOR ALL USING (auth.uid() = user_id);
 
 -- Downloads policies

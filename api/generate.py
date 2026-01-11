@@ -1,9 +1,14 @@
 import json
 import uuid
 import time
-from datetime import datetime
+import datetime
 import os
 import sys
+import signal
+import gc
+import threading
+from functools import partial
+
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from supabase import create_client, Client
@@ -51,7 +56,18 @@ def handler(request):
         if not is_valid:
             return {'error': error}, 400
 
-        # Generate molecules
+        # Create job in DB with processing status
+        job_id = str(uuid.uuid4())
+        job_data = {
+            'id': job_id,
+            'user_id': user_id,
+            'parameters': json.dumps(data),
+            'status': 'processing',
+            'total_molecules': 0  # Will be updated after generation
+        }
+        supabase.table('jobs').insert(job_data).execute()
+
+        # Generate molecules (this is the time-consuming part)
         smiles_list = generate_functionalized_isomers(
             n_carbons=carbon_count,
             functional_groups=functional_groups,
@@ -61,16 +77,11 @@ def handler(request):
             carbon_types=carbon_types
         )
 
-        # Create job in DB
-        job_id = str(uuid.uuid4())
-        job_data = {
-            'id': job_id,
-            'user_id': user_id,
-            'parameters': json.dumps(data),
+        # Update job with completed status and actual molecule count
+        supabase.table('jobs').update({
             'status': 'completed',
             'total_molecules': len(smiles_list)
-        }
-        supabase.table('jobs').insert(job_data).execute()
+        }).eq('id', job_id).execute()
 
         return {
             'job_id': job_id,

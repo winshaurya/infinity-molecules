@@ -1,7 +1,7 @@
-from fastapi import FastAPI, BackgroundTasks, HTTPException, Depends, Request, Header
+from fastapi import FastAPI, HTTPException, Depends, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any
+from typing import List, Dict, Any
 import uuid
 import time
 from datetime import datetime
@@ -12,6 +12,10 @@ import os
 import io
 import zipfile
 import base64
+import gc
+import asyncio
+import functools
+from concurrent.futures import ProcessPoolExecutor
 from supabase import create_client, Client
 from dotenv import load_dotenv
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -36,6 +40,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Generation runtime safeguards
+GENERATION_TIMEOUT_SECONDS = int(os.getenv("GENERATION_TIMEOUT_SECONDS", "180"))
+GENERATION_MAX_WORKERS = int(os.getenv("GENERATION_MAX_WORKERS", "1"))
+
+PROCESS_POOL = ProcessPoolExecutor(max_workers=GENERATION_MAX_WORKERS)
 
 # Supabase setup
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -66,7 +76,7 @@ class JobRequest(BaseModel):
     triple_bonds: int = Field(ge=0, le=10)
     rings: int = Field(ge=0, le=10)
     carbon_types: List[str] = Field(default=["primary", "secondary", "tertiary"])
-    functional_groups: List[str] = Field(max_items=50)
+    functional_groups: List[str] = Field(max_length=50)
 
 class DownloadRequest(BaseModel):
     job_id: str
@@ -227,6 +237,12 @@ def add_credit_history(user_id: str, amount: int, reason: str, description: str)
         print(f"Error adding credit history: {e}")
         raise
 
+
+async def run_generation_with_timeout(params: dict) -> List[str]:
+    loop = asyncio.get_running_loop()
+    worker_fn = functools.partial(_run_generation_task, params)
+    future = loop.run_in_executor(PROCESS_POOL, worker_fn)
+    return await asyncio.wait_for(future, timeout=GENERATION_TIMEOUT_SECONDS)
 def add_download_record(user_id: str, job_id: str, molecules_downloaded: int, credits_used: int, download_type: str):
     """Add download record"""
     try:
@@ -246,6 +262,70 @@ def add_user_activity(user_id: str, activity_type: str, details: str = None, cre
     # Since we now use views for activity history, this function is simplified
     # The activity is automatically tracked through jobs, downloads, and credit_history tables
     pass
+
+
+def _run_generation_task(params: Dict[str, Any]) -> List[str]:
+    """Isolated worker-safe wrapper for molecule generation."""
+    return generate_functionalized_isomers(
+        n_carbons=params.get("carbon_count", 0),
+        functional_groups=params.get("functional_groups", []),
+        n_double_bonds=params.get("double_bonds", 0),
+        n_triple_bonds=params.get("triple_bonds", 0),
+        n_rings=params.get("rings", 0),
+        carbon_types=params.get("carbon_types") or ["primary", "secondary", "tertiary"],
+    )
+
+
+def cleanup_generation_memory():
+    """Best-effort release of Python heap after heavy workloads."""
+    gc.collect()
+
+def store_job_results(user_id: str, job_id: str, molecules: List[str]):
+    if not molecules:
+        return
+    try:
+        payload = {"molecules": molecules}
+        supabase.table('job_results').upsert({
+            'job_id': job_id,
+            'user_id': user_id,
+            'payload': payload
+        }).execute()
+    except Exception as exc:
+        print(f"Error storing job results for {job_id}: {exc}")
+
+
+def load_job_results(job_id: str, user_id: str) -> List[str]:
+    try:
+        response = supabase.table('job_results').select('payload').eq('job_id', job_id).eq('user_id', user_id).execute()
+        records = response.data or []
+        if not records:
+            return []
+        payload = records[0].get('payload')
+        if isinstance(payload, str):
+            payload = json.loads(payload)
+        return payload.get('molecules', []) if payload else []
+    except Exception as exc:
+        print(f"Error loading job results {job_id}: {exc}")
+        return []
+
+
+def delete_job_results(job_id: str):
+    try:
+        supabase.table('job_results').delete().eq('job_id', job_id).execute()
+    except Exception as exc:
+        print(f"Error deleting job results {job_id}: {exc}")
+
+
+def prune_user_jobs(user_id: str, keep: int = 3):
+    try:
+        response = supabase.table('jobs').select('id').eq('user_id', user_id).order('created_at', desc=True).range(keep, keep + 99).execute()
+        stale_jobs = response.data or []
+        for job in stale_jobs:
+            job_id = job['id']
+            delete_job_results(job_id)
+            supabase.table('jobs').delete().eq('id', job_id).execute()
+    except Exception as exc:
+        print(f"Error pruning jobs for user {user_id}: {exc}")
 
 # Dependency to get current user from JWT token
 def get_current_user(request: Request) -> str:
@@ -276,39 +356,9 @@ def get_user_tier(user_id: str) -> str:
     else:
         return 'free'
 
-def generate_molecules_background(job_id: str, user_id: str, params: dict):
-    """Background task to generate molecules (not stored in DB per schema)"""
-    try:
-        # Update job status to processing
-        update_job_status(job_id, 'processing')
-
-        # Generate SMILES
-        smiles_list = generate_functionalized_isomers(
-            n_carbons=params["carbon_count"],
-            functional_groups=params["functional_groups"],
-            n_double_bonds=params["double_bonds"],
-            n_triple_bonds=params["triple_bonds"],
-            n_rings=params["rings"],
-            carbon_types=params["carbon_types"]
-        )
-
-        # Update job with results (molecules not stored in DB per schema)
-        completed_at = datetime.now().isoformat()
-        update_job_status(job_id, 'completed', len(smiles_list), completed_at)
-
-        # Add user activity
-        add_user_activity(user_id, 'job_completed',
-                         f'Generated {len(smiles_list)} molecules', None)
-
-        print(f"✅ Job {job_id} completed: {len(smiles_list)} molecules generated")
-
-    except Exception as e:
-        # Update job status to failed
-        update_job_status(job_id, 'failed')
-        print(f"❌ Error generating molecules for job {job_id}: {e}")
 
 @app.post("/generate")
-async def start_generation(request: JobRequest, background_tasks: BackgroundTasks, user_id: str = Depends(get_current_user)):
+async def start_generation(request: JobRequest, user_id: str = Depends(get_current_user)):
     """Start molecule generation job (FREE)"""
     # Check tier restrictions for large molecules
     user_tier = get_user_tier(user_id)
@@ -340,27 +390,50 @@ async def start_generation(request: JobRequest, background_tasks: BackgroundTask
 
     # Create job in database
     job_id = str(uuid.uuid4())
+    params_dict = request.model_dump()
     job_data = {
         'id': job_id,
         'user_id': user_id,
-        'parameters': json.dumps(request.dict()),
-        'status': 'pending',
+        'parameters': json.dumps(params_dict),
+        'status': 'processing',
         'total_molecules': 0
     }
 
     try:
         create_job(job_data)
+        add_user_activity(
+            user_id,
+            'job_started',
+            f'Started generation: {request.carbon_count} carbons, {len(request.functional_groups)} functional groups',
+            None
+        )
 
-        # Add user activity
-        add_user_activity(user_id, 'job_started',
-                         f'Started generation: {request.carbon_count} carbons, {len(request.functional_groups)} functional groups', None)
+        try:
+            smiles_list = await run_generation_with_timeout(params_dict)
+        except asyncio.TimeoutError:
+            update_job_status(job_id, 'failed')
+            raise HTTPException(status_code=504, detail="Generation timed out. Please simplify the request and try again.")
+        except Exception as e:
+            update_job_status(job_id, 'failed')
+            raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
 
-        # Start background generation
-        background_tasks.add_task(generate_molecules_background, job_id, user_id, request.dict())
+        completed_at = datetime.now().isoformat()
+        update_job_status(job_id, 'completed', len(smiles_list), completed_at)
 
-        return {"job_id": job_id, "status": "started", "message": "Generation started (FREE)"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to create job: {str(e)}")
+        store_job_results(user_id, job_id, smiles_list)
+
+        prune_user_jobs(user_id)
+        add_user_activity(user_id, 'job_completed', f'Generated {len(smiles_list)} molecules', None)
+
+        return {
+            "job_id": job_id,
+            "status": "completed",
+            "total_molecules": len(smiles_list),
+            "molecules": smiles_list,
+            "message": "Generation completed"
+        }
+    finally:
+        cleanup_generation_memory()
 
 @app.get("/jobs/{job_id}")
 async def get_job_status(job_id: str, user_id: str = Depends(get_current_user)):
@@ -371,13 +444,17 @@ async def get_job_status(job_id: str, user_id: str = Depends(get_current_user)):
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
 
+        params = json.loads(job['parameters']) if job['parameters'] else {}
+        molecules = load_job_results(job_id, user_id) if job['status'] == 'completed' else None
+
         return {
             "job_id": job['id'],
             "status": job['status'],
             "total_molecules": job['total_molecules'],
             "created_at": job['created_at'],
             "completed_at": job['completed_at'],
-            "parameters": json.loads(job['parameters']) if job['parameters'] else None
+            "parameters": params,
+            "molecules": molecules
         }
     except HTTPException:
         raise
@@ -397,16 +474,18 @@ async def get_job_preview(job_id: str, user_id: str = Depends(get_current_user))
         if job['status'] != 'completed':
             raise HTTPException(status_code=400, detail="Job not completed yet")
 
-        # Since molecules aren't stored in DB, regenerate a few for preview
-        params = json.loads(job['parameters'])
-        smiles_list = generate_functionalized_isomers(
-            n_carbons=params["carbon_count"],
-            functional_groups=params["functional_groups"],
-            n_double_bonds=params["double_bonds"],
-            n_triple_bonds=params["triple_bonds"],
-            n_rings=params["rings"],
-            carbon_types=params["carbon_types"]
-        )
+        params = json.loads(job['parameters']) if job['parameters'] else {}
+        smiles_list = load_job_results(job_id, user_id)
+
+        if not smiles_list:
+            smiles_list = generate_functionalized_isomers(
+                n_carbons=params.get("carbon_count", 0),
+                functional_groups=params.get("functional_groups", []),
+                n_double_bonds=params.get("double_bonds", 0),
+                n_triple_bonds=params.get("triple_bonds", 0),
+                n_rings=params.get("rings", 0),
+                carbon_types=params.get("carbon_types") or ["primary", "secondary", "tertiary"]
+            )
 
         # Return first 3 molecules as preview
         preview_molecules = smiles_list[:3] if len(smiles_list) >= 3 else smiles_list
@@ -472,16 +551,18 @@ async def download_molecules(request: DownloadRequest, user_id: str = Depends(ge
                          f'Downloaded {request.molecules_count} molecules in {request.download_format} format',
                          -credits_required)
 
-        # Regenerate molecules (since not stored in DB)
-        params = json.loads(job['parameters'])
-        smiles_list = generate_functionalized_isomers(
-            n_carbons=params["carbon_count"],
-            functional_groups=params["functional_groups"],
-            n_double_bonds=params["double_bonds"],
-            n_triple_bonds=params["triple_bonds"],
-            n_rings=params["rings"],
-            carbon_types=params["carbon_types"]
-        )
+        params = json.loads(job['parameters']) if job['parameters'] else {}
+        smiles_list = load_job_results(request.job_id, user_id)
+
+        if not smiles_list:
+            smiles_list = generate_functionalized_isomers(
+                n_carbons=params.get("carbon_count", 0),
+                functional_groups=params.get("functional_groups", []),
+                n_double_bonds=params.get("double_bonds", 0),
+                n_triple_bonds=params.get("triple_bonds", 0),
+                n_rings=params.get("rings", 0),
+                carbon_types=params.get("carbon_types") or ["primary", "secondary", "tertiary"]
+            )
 
         # Take requested count
         selected_smiles = smiles_list[:request.molecules_count]

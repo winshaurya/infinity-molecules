@@ -55,8 +55,7 @@ def download_molecules(user_id, job_id, molecules_count, download_format):
     if job['status'] != 'completed':
         return {'error': 'Job not completed'}, 400
 
-    if molecules_count > job['total_molecules']:
-        return {'error': f'Requested {molecules_count} but only {job["total_molecules"]} available'}, 400
+    # Allow any molecules_count - we'll clamp it below
 
     # Get user
     user_response = supabase.table('users').select('*').eq('id', user_id).execute()
@@ -75,8 +74,11 @@ def download_molecules(user_id, job_id, molecules_count, download_format):
     if download_format == 'all' and tier != 'fullaccess':
         return {'error': 'Full batch download requires fullaccess tier'}, 403
 
-    # Calculate credits
-    credits_required = (molecules_count + 999) // 1000  # Ceiling division
+    # Clamp molecules_count to available molecules
+    actual_molecules_count = min(molecules_count, job['total_molecules'])
+
+    # Calculate credits based on actual molecules to download
+    credits_required = (actual_molecules_count + 999) // 1000  # Ceiling division
 
     if user['credits'] < credits_required:
         return {'error': f'Insufficient credits. Required: {credits_required}, Available: {user["credits"]}'}, 402
@@ -89,8 +91,8 @@ def download_molecules(user_id, job_id, molecules_count, download_format):
     supabase.table('credit_history').insert({
         'user_id': user_id,
         'amount': -credits_required,
-        'reason': f'Download {molecules_count} molecules',
-        'description': f'Downloaded {molecules_count} molecules in {download_format} format'
+        'reason': f'Download {actual_molecules_count} molecules',
+        'description': f'Downloaded {actual_molecules_count} molecules in {download_format} format'
     }).execute()
 
     # Regenerate molecules (since not stored)
@@ -104,55 +106,26 @@ def download_molecules(user_id, job_id, molecules_count, download_format):
         carbon_types=params["carbon_types"]
     )
 
-    # Take requested count
-    selected_smiles = smiles_list[:molecules_count]
+    # Take actual count (clamped to available)
+    selected_smiles = smiles_list[:actual_molecules_count]
 
-    # Format data
-    if download_format == 'csv':
-        data = 'SMILES\n' + '\n'.join(selected_smiles)
-        content_type = 'text/csv'
-        filename = f'molecules_{job_id}.csv'
-    elif download_format == 'molsdf':
-        # Create ZIP file with MOL, SDF, and CSV files
-        import io
-        import zipfile
-        import base64
-        zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-            # Create CSV file
-            csv_data = 'SMILES\n' + '\n'.join(selected_smiles)
-            zip_file.writestr(f'molecules_{job_id}.csv', csv_data)
-            
-            # Create SDF file
-            sdf_data = ''
-            for i, smiles in enumerate(selected_smiles):
-                mol = Chem.MolFromSmiles(smiles)
-                if mol:
-                    sdf_data += Chem.MolToMolBlock(mol) + '\n$$$$\n'
-            zip_file.writestr(f'molecules_{job_id}.sdf', sdf_data)
-            
-            # Create individual MOL files
-            for i, smiles in enumerate(selected_smiles):
-                mol = Chem.MolFromSmiles(smiles)
-                if mol:
-                    mol_block = Chem.MolToMolBlock(mol)
-                    zip_file.writestr(f'molecule_{i+1:04d}.mol', mol_block)
-        
-        data = base64.b64encode(zip_buffer.getvalue()).decode('utf-8')
-        content_type = 'application/zip'
-        filename = f'molecules_{job_id}_package.zip'
-    else:
-        data = json.dumps({'molecules': selected_smiles})
-        content_type = 'application/json'
-        filename = f'molecules_{job_id}.json'
+    # Return SMILES data to frontend for client-side processing
+    data = json.dumps({
+        'smiles': selected_smiles,
+        'format': download_format,
+        'job_id': job_id
+    })
+    content_type = 'application/json'
+    filename = f'molecules_{job_id}.json'
 
     return {
         'success': True,
         'credits_used': credits_required,
         'remaining_credits': new_credits,
+        'actual_molecules_count': actual_molecules_count,
         'download_id': str(uuid.uuid4()),
         'data': data,
         'content_type': content_type,
         'filename': filename,
-        'message': f'Download prepared. {credits_required} credits deducted.'
+        'message': f'Download prepared. {credits_required} credits deducted for {actual_molecules_count} molecules.'
     }
