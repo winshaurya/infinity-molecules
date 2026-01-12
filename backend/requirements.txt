@@ -1,8 +1,22 @@
+# Core web framework
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
+
+# Data validation
 pydantic==2.5.0
+
+# Supabase Python client
 supabase==2.3.0
+
+# Environment variables loader
 python-dotenv==1.0.0
-rdkit==2023.9.5
+
+# Graph / chemistry utilities
 networkx==3.2.1
 psutil==5.9.6
+
+# RDKit: binary package — may not install on Vercel's serverless environment.
+# If RDKit fails to install during deploy, either deploy via a Docker image
+# on a platform that supports custom images, or remove/replace RDKit usage.
+# Try to install a pip wheel that matches your target platform.
+rdkit==2023.9.5

@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException, Depends, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any
+from fastapi.responses import HTMLResponse
 import uuid
 import time
 from datetime import datetime
@@ -21,8 +22,22 @@ from dotenv import load_dotenv
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from core_logic import generate_functionalized_isomers, validate_structure_possibility, get_functional_group_type, get_element_counts, rdMolDescriptors
-from rdkit import Chem
-from rdkit import Chem
+import traceback
+
+# lazy-import core logic & RDKit with graceful handling so the process doesn't crash
+STARTUP_ERROR = None
+try:
+    from core_logic import generate_functionalized_isomers, validate_structure_possibility, get_functional_group_type, get_element_counts, rdMolDescriptors
+    from rdkit import Chem
+except Exception:
+    STARTUP_ERROR = traceback.format_exc()
+    # Export placeholders so module imports succeed; endpoints will return clear error
+    generate_functionalized_isomers = None
+    validate_structure_possibility = None
+    get_functional_group_type = None
+    get_element_counts = None
+    rdMolDescriptors = None
+    Chem = None
 
 # Load environment variables
 load_dotenv()
@@ -360,6 +375,9 @@ def get_user_tier(user_id: str) -> str:
 @app.post("/generate")
 async def start_generation(request: JobRequest, user_id: str = Depends(get_current_user)):
     """Start molecule generation job (FREE)"""
+    if STARTUP_ERROR:
+        print("Startup error detected:\n", STARTUP_ERROR)
+        raise HTTPException(status_code=500, detail="Server startup error: check application logs for import failures (RDKit/core).")
     # Check tier restrictions for large molecules
     user_tier = get_user_tier(user_id)
     if request.carbon_count > 7 and user_tier == 'free':
@@ -464,6 +482,9 @@ async def get_job_status(job_id: str, user_id: str = Depends(get_current_user)):
 @app.get("/jobs/{job_id}/preview")
 async def get_job_preview(job_id: str, user_id: str = Depends(get_current_user)):
     """Get preview of generated molecules (regenerate first few since not stored in DB)"""
+    if STARTUP_ERROR:
+        print("Startup error detected:\n", STARTUP_ERROR)
+        raise HTTPException(status_code=500, detail="Server startup error: check application logs for import failures (RDKit/core).")
     try:
         # Get job
         job = get_job_by_id(job_id, user_id)
@@ -506,6 +527,9 @@ async def get_job_preview(job_id: str, user_id: str = Depends(get_current_user))
 @app.post("/download")
 async def download_molecules(request: DownloadRequest, user_id: str = Depends(get_current_user)):
     """Download molecules using credits (1 credit = 1000 molecules)"""
+    if STARTUP_ERROR:
+        print("Startup error detected:\n", STARTUP_ERROR)
+        raise HTTPException(status_code=500, detail="Server startup error: check application logs for import failures (RDKit/core).")
     try:
         # Get job details
         job = get_job_by_id(request.job_id, user_id)
@@ -733,6 +757,17 @@ async def refill_credits(request: CreditRefillRequest, user_id: str = Depends(ge
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to refill credits: {str(e)}")
 
+@app.get("/", response_class=HTMLResponse)
+async def root_status():
+    return """
+    <html>
+        <head><title>Infinity Backend</title></head>
+        <body>
+            <h1>Infinity API is running</h1>
+            <p>Status: OK</p>
+        </body>
+    </html>
+    """
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
