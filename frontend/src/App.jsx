@@ -96,7 +96,7 @@ function App() {
     }
   }
 
-  const handleDownload = async (downloadForm) => {
+  const handleDownload = async (downloadForm, onProgress) => {
     if (!user) {
       setShowAuthModal(true)
       return
@@ -144,7 +144,7 @@ function App() {
         const { createDownloadBlob } = await import('./utils/downloadUtils.js')
 
         // Create download blob using RDKit.js in browser
-        blob = await createDownloadBlob(smiles, format, job_id)
+        blob = await createDownloadBlob(smiles, format, job_id, onProgress)
 
         if (format === 'csv') {
           filename = `molecules_${job_id}.csv`

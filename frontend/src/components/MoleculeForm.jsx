@@ -79,12 +79,6 @@ function MoleculeForm({ formData, onInputChange, onCarbonTypeChange, functionalG
         <label><input type="radio" name="cpu" value="custom" /> Custom:</label>
         <input type="number" min="1" max="4" defaultValue="4" style={{ width: '50px' }} />
       </div>
-
-      <label>Select output directory:</label>
-      <div className="output-dir">
-        <input type="text" placeholder="Select output directory" />
-        <button>Browse...</button>
-      </div>
     </>
   )
 }

@@ -26,21 +26,10 @@ function DownloadSection({ user, jobs, profile, onDownload, onRefillCredits, cur
     setIsDownloading(true)
     setDownloadProgress(0)
 
-    // Simulate progress for MOL/SDF rendering
-    if (downloadForm.format === 'molsdf') {
-      const progressInterval = setInterval(() => {
-        setDownloadProgress(prev => {
-          if (prev >= 90) {
-            clearInterval(progressInterval)
-            return 90
-          }
-          return prev + 10
-        })
-      }, 200)
-    }
-
     try {
-      await onDownload(downloadForm)
+      await onDownload(downloadForm, (progress) => {
+        setDownloadProgress(progress)
+      })
       setDownloadProgress(100)
     } finally {
       setTimeout(() => {
