@@ -38,26 +38,33 @@ export async function createDownloadBlob(smilesList, format, jobId, onProgress) 
 
     // Create per-molecule files
     for (let i = 0; i < smilesList.length; i++) {
-      const smiles = smilesList[i];
-      const indexStr = (i + 1).toString().padStart(4, '0');
-      metadataLines.push(`${indexStr},${smiles}`);
+        const smiles = smilesList[i];
+        const indexStr = (i + 1).toString().padStart(4, '0');
+        metadataLines.push(`${indexStr},${smiles}`);
 
-      try {
-        const mol = rdkit.get_mol(smiles);
-        if (mol) {
-          const molBlock = mol.get_molblock();
-          // Save individual MOL file
-          zip.file(`${molFolder}/molecule_${indexStr}.mol`, molBlock);
+        try {
+            // Check if smiles is valid before processing
+            if (!smiles || typeof smiles !== 'string') {
+                console.warn(`Invalid SMILES at index ${i}:`, smiles);
+                continue;
+            }
+            
+            const mol = rdkit.get_mol(smiles);
+            if (mol) {
+                const molBlock = mol.get_molblock();
+                if (molBlock) {
+                    // Save individual MOL file
+                    zip.file(`${molFolder}/molecule_${indexStr}.mol`, molBlock);
 
-          // Save individual SDF file (single entry)
-          const sdfBlock = molBlock + '\n$$$$\n';
-          zip.file(`${sdfFolder}/molecule_${indexStr}.sdf`, sdfBlock);
-
-          mol.delete();
+                    // Save individual SDF file (single entry)
+                    const sdfBlock = molBlock + '\n$$$$\n';
+                    zip.file(`${sdfFolder}/molecule_${indexStr}.sdf`, sdfBlock);
+                }
+                mol.delete();
+            }
+        } catch (error) {
+            console.error('Error converting SMILES to MOL:', smiles, error);
         }
-      } catch (error) {
-        console.error('Error converting SMILES to MOL:', smiles, error);
-      }
 
       // Report progress (structured into 90% of work)
       if (onProgress) {
