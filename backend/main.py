@@ -58,7 +58,7 @@ app.add_middleware(
 
 # Generation runtime safeguards
 GENERATION_TIMEOUT_SECONDS = int(os.getenv("GENERATION_TIMEOUT_SECONDS", "180"))
-GENERATION_MAX_WORKERS = int(os.getenv("GENERATION_MAX_WORKERS", "1"))
+GENERATION_MAX_WORKERS = int(os.getenv("GENERATION_MAX_WORKERS", "4"))
 
 PROCESS_POOL = ProcessPoolExecutor(max_workers=GENERATION_MAX_WORKERS)
 
