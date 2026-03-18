@@ -7,10 +7,12 @@ export async function getRDKit() {
     rdkitPromise = (async () => {
       // If we are in production, we need to tell RDKit where the WASM is
       const options = {
-        locateFile: (file) => `/${file}`
+        locateFile: (file) => {
+          // Point to the local copy in public folder
+          return `/${file}`;
+        }
       };
       
-      if (window.initRDKit) return await window.initRDKit(options);
       const module = await import('@rdkit/rdkit');
       const init = module.initRDKit || module.default?.initRDKit || module.default;
       if (typeof init !== 'function') {
