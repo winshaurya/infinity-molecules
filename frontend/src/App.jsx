@@ -133,36 +133,23 @@ function App() {
 
       const data = await response.json()
 
-      // Check if this is the new format (JSON with SMILES) or old format (base64)
-      let blob, filename, contentType
+      // The backend now returns { success: true, job_id, molecules: [...], credits_used, ... }
+      // We take the SMILES list from 'molecules' and render/zip them on the frontend
+      const { molecules, job_id } = data
+      const format = downloadForm.format
 
-      if (data.data && data.data.startsWith('{') && data.data.includes('smiles')) {
-        // New format: JSON with SMILES data
-        const { smiles, format, job_id } = JSON.parse(data.data)
+      // Import download utilities
+      const { createDownloadBlob } = await import('./utils/downloadUtils.js')
 
-        // Import download utilities
-        const { createDownloadBlob } = await import('./utils/downloadUtils.js')
+      // Create download blob using RDKit.js in browser
+      // This will now use the updated logic in downloadUtils.js to create the structured ZIP
+      const blob = await createDownloadBlob(molecules, format, job_id, onProgress)
 
-        // Create download blob using RDKit.js in browser
-        blob = await createDownloadBlob(smiles, format, job_id, onProgress)
-
-        if (format === 'csv') {
-          filename = `molecules_${job_id}.csv`
-          contentType = 'text/csv'
-        } else if (format === 'molsdf') {
-          filename = `molecules_${job_id}_package.zip`
-          contentType = 'application/zip'
-        }
+      let filename
+      if (format === 'csv') {
+        filename = `molecules_${job_id.slice(0, 8)}.csv`
       } else {
-        // Old format: base64 encoded data
-        let blobData = data.data
-        if (data.content_type === 'application/zip') {
-          // Decode base64 for zip files
-          blobData = Uint8Array.from(atob(data.data), c => c.charCodeAt(0))
-        }
-        blob = new Blob([blobData], { type: data.content_type })
-        filename = data.filename
-        contentType = data.content_type
+        filename = `molecules_${job_id.slice(0, 8)}_package.zip`
       }
 
       // Create download link
@@ -175,14 +162,7 @@ function App() {
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
 
-      // Update toast with actual count if it was clamped
-      const actualCount = data.actual_molecules_count
-      const requestedCount = downloadForm.moleculesCount
-      const message = actualCount < requestedCount
-        ? `Download prepared. ${data.credits_used} credits deducted for ${actualCount} molecules (clamped from ${requestedCount}).`
-        : data.message
-
-      setToast({ message, type: 'success' })
+      setToast({ message: data.message || `Downloaded ${molecules.length} molecules.`, type: 'success' })
       setTimeout(() => setToast(null), 5000)
     } catch (error) {
       setToast({ message: 'Download failed: ' + error.message, type: 'error' })

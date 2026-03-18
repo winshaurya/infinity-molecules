@@ -591,59 +591,14 @@ async def download_molecules(request: DownloadRequest, user_id: str = Depends(ge
         # Take requested count
         selected_smiles = smiles_list[:request.molecules_count]
 
-        # Format data based on download format
-        if request.download_format == 'csv':
-            data = 'SMILES\n' + '\n'.join(selected_smiles)
-            content_type = 'text/csv'
-            filename = f'molecules_{request.job_id[:8]}.csv'
-        elif request.download_format == 'molsdf':
-            # Create ZIP file with MOL, SDF, and CSV files
-            zip_buffer = io.BytesIO()
-            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-                # Create CSV file
-                csv_data = 'SMILES\n' + '\n'.join(selected_smiles)
-                zip_file.writestr(f'molecules_{request.job_id[:8]}.csv', csv_data)
-                
-                # Create SDF file
-                sdf_data = ''
-                for i, smiles in enumerate(selected_smiles):
-                    try:
-                        mol = Chem.MolFromSmiles(smiles)
-                        if mol:
-                            mol_block = Chem.MolToMolBlock(mol)
-                            sdf_data += mol_block + '\n$$$$\n'
-                    except:
-                        continue  # Skip invalid molecules
-                zip_file.writestr(f'molecules_{request.job_id[:8]}.sdf', sdf_data)
-                
-                # Create individual MOL files
-                for i, smiles in enumerate(selected_smiles):
-                    try:
-                        mol = Chem.MolFromSmiles(smiles)
-                        if mol:
-                            mol_block = Chem.MolToMolBlock(mol)
-                            zip_file.writestr(f'molecule_{i+1:04d}.mol', mol_block)
-                    except:
-                        continue  # Skip invalid molecules
-            
-            data = base64.b64encode(zip_buffer.getvalue()).decode('utf-8')
-            content_type = 'application/zip'
-            filename = f'molecules_{request.job_id[:8]}_package.zip'
-        else:  # json or all
-            data = json.dumps({'molecules': selected_smiles})
-            content_type = 'application/json'
-            filename = f'molecules_{request.job_id[:8]}.json'
-
         return {
             "success": True,
+            "job_id": request.job_id,
+            "molecules": selected_smiles,
             "credits_used": credits_required,
             "remaining_credits": new_credits,
-            "data": data,
-            "content_type": content_type,
-            "filename": filename,
-            "message": f"Downloaded {len(selected_smiles)} molecules. {credits_required} credits deducted."
+            "message": f"Retrieved {len(selected_smiles)} molecules for processing. {credits_required} credits deducted."
         }
-
     except HTTPException:
         raise
     except Exception as e:

@@ -17,53 +17,56 @@ export async function createDownloadBlob(smilesList, format, jobId, onProgress) 
     const csvContent = 'SMILES\n' + smilesList.join('\n');
     return new Blob([csvContent], { type: 'text/csv' });
   } else if (format === 'molsdf') {
-    // Create ZIP with MOL, SDF, and CSV files
+    // Create ZIP with a structured directory: per-molecule MOL/SDF + metadata
     const JSZip = (await import('jszip')).default;
     const zip = new JSZip();
+    const rootFolder = `molecules_${jobId}`;
+    const molFolder = `${rootFolder}/MOL Files`;
+    const sdfFolder = `${rootFolder}/SDF Files`;
 
-    // Add CSV file
+    // Add CSV file at root
     const csvContent = 'SMILES\n' + smilesList.join('\n');
-    zip.file(`molecules_${jobId}.csv`, csvContent);
+    zip.file(`${rootFolder}/molecules_${jobId}.csv`, csvContent);
 
-    // Add SDF file
-    let sdfContent = '';
+    // Metadata file
+    const metadataLines = [];
+    metadataLines.push(`Job ID: ${jobId}`);
+    metadataLines.push(`Generated: ${new Date().toISOString()}`);
+    metadataLines.push(`Total molecules: ${smilesList.length}`);
+    metadataLines.push('');
+    metadataLines.push('Index,SMILES');
+
+    // Create per-molecule files
     for (let i = 0; i < smilesList.length; i++) {
       const smiles = smilesList[i];
+      const indexStr = (i + 1).toString().padStart(4, '0');
+      metadataLines.push(`${indexStr},${smiles}`);
+
       try {
         const mol = rdkit.get_mol(smiles);
         if (mol) {
           const molBlock = mol.get_molblock();
-          sdfContent += molBlock + '\n$$$$\n';
+          // Save individual MOL file
+          zip.file(`${molFolder}/molecule_${indexStr}.mol`, molBlock);
+
+          // Save individual SDF file (single entry)
+          const sdfBlock = molBlock + '\n$$$$\n';
+          zip.file(`${sdfFolder}/molecule_${indexStr}.sdf`, sdfBlock);
+
           mol.delete();
         }
       } catch (error) {
         console.error('Error converting SMILES to MOL:', smiles, error);
       }
-      // Report progress for SDF creation (first 50% of progress)
-      if (onProgress) {
-        onProgress(Math.round((i + 1) / smilesList.length * 50));
-      }
-    }
-    zip.file(`molecules_${jobId}.sdf`, sdfContent);
 
-    // Add individual MOL files
-    for (let i = 0; i < smilesList.length; i++) {
-      const smiles = smilesList[i];
-      try {
-        const mol = rdkit.get_mol(smiles);
-        if (mol) {
-          const molBlock = mol.get_molblock();
-          zip.file(`molecule_${(i + 1).toString().padStart(4, '0')}.mol`, molBlock);
-          mol.delete();
-        }
-      } catch (error) {
-        console.error('Error converting SMILES to MOL:', smiles, error);
-      }
-      // Report progress for MOL files creation (next 40% of progress)
+      // Report progress (structured into 90% of work)
       if (onProgress) {
-        onProgress(Math.round(50 + (i + 1) / smilesList.length * 40));
+        onProgress(Math.round((i + 1) / smilesList.length * 90));
       }
     }
+
+    // Write metadata file
+    zip.file(`${rootFolder}/metadata.txt`, metadataLines.join('\n'));
 
     // Generate ZIP blob (last 10% of progress)
     if (onProgress) onProgress(90);
