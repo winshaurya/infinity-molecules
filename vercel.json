@@ -13,6 +13,11 @@
       "use": "@vercel/python"
     }
   ],
+  "functions": {
+    "api/**/*.js": {
+      "includeFiles": "node_modules/@rdkit/rdkit/dist/RDKit_minimal.wasm"
+    }
+  },
   "routes": [
     {
       "src": "/api/(.*)",

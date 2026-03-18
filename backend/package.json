@@ -1,0 +1,30 @@
+{
+  "name": "infinity-backend",
+  "version": "1.0.0",
+  "description": "Molecule generation API backend",
+  "main": "main.js",
+  "scripts": {
+    "start": "node main.js",
+    "dev": "node main.js",
+    "perf": "node tests/mock_performance_test.js",
+    "compare": "node tests/compare_smiles_cross_lang.js",
+    "test:js": "node tests/core_logic_openchemlib_test.js",
+    "test:compare": "node tests/compare_smiles_cross_lang.js",
+    "test": "npm run test:js && npm run test:compare"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.38.4",
+    "archiver": "^6.0.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.22.1",
+    "graphlib": "^2.1.8",
+    "joi": "^17.11.0",
+    "multer": "^1.4.5-lts.1",
+    "openchemlib": "^9.18.2",
+    "uuid": "^9.0.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
