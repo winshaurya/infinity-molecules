@@ -12,13 +12,16 @@ RUN mamba create -n rdkit-env python=3.11 rdkit numpy pandas -c conda-forge -y &
 ENV PATH="/opt/conda/envs/rdkit-env/bin:$PATH"
 
 # Copy requirements first for better caching
-COPY requirements.txt .
+COPY backend/requirements.txt requirements.txt
 
 # Install remaining Python dependencies (excluding RDKit which is already installed)
 RUN pip install --no-cache-dir fastapi uvicorn pydantic supabase python-dotenv networkx psutil
 
-# Copy the rest of the application
+# Copy everything
 COPY . .
+
+# Set working directory to backend
+WORKDIR /app/backend
 
 # Expose port
 EXPOSE 8000
