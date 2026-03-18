@@ -48,9 +48,19 @@ app = FastAPI(title="Chemistry SaaS API")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 
+# List of allowed origins for CORS
+# In production, this should include your Vercel URL
+ALLOWED_ORIGINS = [
+    FRONTEND_URL,
+    "https://infinityatoms.vercel.app",
+    "https://infinity-molecules.vercel.app",
+    "http://localhost:5173",
+    "http://localhost:3000"
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_URL],  # Allow frontend domain
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
