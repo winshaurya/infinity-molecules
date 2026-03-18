@@ -4,7 +4,14 @@ let rdkitPromise = null;
 
 export async function getRDKit() {
   if (!rdkitPromise) {
-    rdkitPromise = initRDKit();
+    rdkitPromise = window.initRDKit ? window.initRDKit() : (async () => {
+      const module = await import('@rdkit/rdkit');
+      const init = module.initRDKit || (module.default && module.default.initRDKit) || module.default;
+      if (typeof init !== 'function') {
+        throw new Error('RDKit initialization function not found');
+      }
+      return await init();
+    })();
   }
   return await rdkitPromise;
 }
