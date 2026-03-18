@@ -10,13 +10,13 @@ import threading
 from functools import partial
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'backend'))
 
 from supabase import create_client, Client
 from dotenv import load_dotenv
 load_dotenv()
 
 # Import core logic
-sys.path.append(os.path.join(os.path.dirname(__file__), 'backend'))
 from core_logic import generate_functionalized_isomers, validate_structure_possibility
 
 # Supabase setup
