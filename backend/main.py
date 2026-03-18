@@ -409,6 +409,7 @@ async def start_generation(request: JobRequest, user_id: str = Depends(get_curre
     # Create job in database
     job_id = str(uuid.uuid4())
     params_dict = request.model_dump()
+    print(f"DEBUG: Starting generation for job {job_id} with params: {params_dict}")
     job_data = {
         'id': job_id,
         'user_id': user_id,
@@ -427,11 +428,15 @@ async def start_generation(request: JobRequest, user_id: str = Depends(get_curre
         )
 
         try:
+            print(f"DEBUG: Running generation with timeout for {job_id}")
             smiles_list = await run_generation_with_timeout(params_dict)
+            print(f"DEBUG: Generation finished for {job_id}, found {len(smiles_list)} molecules")
         except asyncio.TimeoutError:
+            print(f"DEBUG: Generation TIMEOUT for {job_id}")
             update_job_status(job_id, 'failed')
             raise HTTPException(status_code=504, detail="Generation timed out. Please simplify the request and try again.")
         except Exception as e:
+            print(f"DEBUG: Generation FAILED for {job_id}: {str(e)}")
             update_job_status(job_id, 'failed')
             raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
 
