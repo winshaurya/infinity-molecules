@@ -5,7 +5,12 @@ let rdkitPromise = null;
 export async function getRDKit() {
   if (!rdkitPromise) {
     rdkitPromise = (async () => {
-      if (window.initRDKit) return await window.initRDKit();
+      // If we are in production, we need to tell RDKit where the WASM is
+      const options = {
+        locateFile: (file) => `/${file}`
+      };
+      
+      if (window.initRDKit) return await window.initRDKit(options);
       const module = await import('@rdkit/rdkit');
       const init = module.initRDKit || module.default?.initRDKit || module.default;
       if (typeof init !== 'function') {
@@ -13,7 +18,7 @@ export async function getRDKit() {
         console.error(msg, module);
         throw new Error(msg);
       }
-      return await init();
+      return await init(options);
     })();
   }
   return await rdkitPromise;
