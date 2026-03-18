@@ -8,7 +8,9 @@ export async function getRDKit() {
       // If we are in production, we need to tell RDKit where the WASM is
       const options = {
         locateFile: (file) => {
-          // Point to the local copy in public folder
+          if (file.endsWith('.wasm')) {
+            return '/RDKit_minimal.wasm';
+          }
           return `/${file}`;
         }
       };
